@@ -1,0 +1,30 @@
+{
+  "name": "capacitor-ads",
+  "version": "1.0.0",
+  "description": "AdMob banner, rewarded ads, UMP consent and ATT for Capacitor apps — one setup call.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./patches/*": "./patches/*",
+    "./ios/*": "./ios/*"
+  },
+  "bin": { "capacitor-ads-patch": "bin/install-patch.mjs" },
+  "files": ["dist", "src", "patches", "ios", "bin", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node --test test/*.test.mjs"
+  },
+  "peerDependencies": {
+    "@capacitor-community/admob": "6.2.0",
+    "@capacitor/core": "^6.0.0"
+  },
+  "devDependencies": {
+    "@capacitor-community/admob": "6.2.0",
+    "@capacitor/core": "^6.1.0",
+    "typescript": "^5.4.0"
+  },
+  "repository": { "type": "git", "url": "https://github.com/behrank/capacitor-ads.git" },
+  "license": "MIT"
+}

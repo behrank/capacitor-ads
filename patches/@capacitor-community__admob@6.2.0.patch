@@ -1,0 +1,140 @@
+diff --git a/Package.swift b/Package.swift
+index e4baa3f..a30e68e 100644
+--- a/Package.swift
++++ b/Package.swift
+@@ -11,7 +11,7 @@ let package = Package(
+     ],
+     dependencies: [
+         .package(url: "https://github.com/ionic-team/capacitor-swift-pm.git", from: "6.0.0"),
+-        .package(url: "https://github.com/googleads/swift-package-manager-google-mobile-ads.git", branch: "main")
++        .package(url: "https://github.com/googleads/swift-package-manager-google-mobile-ads.git", "11.3.0"..<"12.0.0")
+     ],
+     targets: [
+         .target(
+diff --git a/ios/Sources/AdMobPlugin/Banner/BannerExecutor.swift b/ios/Sources/AdMobPlugin/Banner/BannerExecutor.swift
+index 1fdb654..c2849ab 100644
+--- a/ios/Sources/AdMobPlugin/Banner/BannerExecutor.swift
++++ b/ios/Sources/AdMobPlugin/Banner/BannerExecutor.swift
+@@ -5,6 +5,8 @@ import GoogleMobileAds
+ class BannerExecutor: NSObject, GADBannerViewDelegate {
+     weak var plugin: AdMobPlugin?
+     var bannerView: GADBannerView!
++    private var bannerPosition = "BOTTOM_CENTER"
++    private var bannerMargin = 0
+ 
+     func showBanner(_ call: CAPPluginCall, _ request: GADRequest, _ adUnitID: String) {
+         if let rootViewController = plugin?.getRootVC() {
+@@ -12,6 +14,8 @@ class BannerExecutor: NSObject, GADBannerViewDelegate {
+             let adSize = call.getString("adSize") ?? "ADAPTIVE_BANNER"
+             let adPosition = call.getString("position") ?? "BOTTOM_CENTER"
+             let adMargin = call.getInt("margin") ?? 0
++            self.bannerPosition = adPosition
++            self.bannerMargin = adMargin
+ 
+             var bannerSize: GADAdSize
+ 
+@@ -50,13 +54,11 @@ class BannerExecutor: NSObject, GADBannerViewDelegate {
+             }
+ 
+             self.bannerView = GADBannerView(adSize: bannerSize)
+-            self.addBannerViewToView(self.bannerView, adPosition, adMargin)
+-            self.bannerView.translatesAutoresizingMaskIntoConstraints = false
+             self.bannerView.adUnitID = adUnitID
+             self.bannerView.rootViewController = plugin?.getRootVC()
+-
+-            self.bannerView.load(request)
+             self.bannerView.delegate = self
++            self.addBannerViewToView(self.bannerView, adPosition, adMargin)
++            self.bannerView.load(request)
+ 
+             call.resolve([:])
+         }
+@@ -111,25 +113,47 @@ class BannerExecutor: NSObject, GADBannerViewDelegate {
+         removeBannerViewToView()
+         if let rootViewController = plugin?.getRootVC() {
+ 
+-            bannerView.translatesAutoresizingMaskIntoConstraints = false
++            bannerView.translatesAutoresizingMaskIntoConstraints = true
+             bannerView.tag = 2743243288699 // rand
+             rootViewController.view.addSubview(bannerView)
+-            rootViewController.view.addConstraints(
+-                [NSLayoutConstraint(item: bannerView,
+-                                    attribute: adPosition == "TOP_CENTER" ? .top : .bottom,
+-                                    relatedBy: .equal,
+-                                    toItem: rootViewController.view.safeAreaLayoutGuide,
+-                                    attribute: adPosition == "TOP_CENTER" ? .top : .bottom,
+-                                    multiplier: 1,
+-                                    constant: CGFloat(Int(Margin) * -1)),
+-                 NSLayoutConstraint(item: bannerView,
+-                                    attribute: .centerX,
+-                                    relatedBy: .equal,
+-                                    toItem: rootViewController.view,
+-                                    attribute: .centerX,
+-                                    multiplier: 1,
+-                                    constant: 0)
+-                ])
++            bannerView.backgroundColor = .clear
++            // Auto Layout was compressing the 320×50 banner, so the creative
++            // sat on the top edge and the first line was clipped.
++            placeBanner(bannerView, adPosition, Margin)
++        }
++    }
++
++    /// Puts the fixed-height banner on the safe-area edge, then pins the
++    /// creative to the bottom of that box so the unused points sit above it.
++    private func placeBanner(_ bannerView: GADBannerView, _ adPosition: String, _ margin: Int) {
++        guard let root = plugin?.getRootVC()?.view else { return }
++        let size = bannerView.adSize.size
++        let width = size.width > 1 ? size.width : 320
++        let height = size.height > 1 ? size.height : 50
++        let safe = root.safeAreaInsets
++        let x = (root.bounds.width - width) / 2
++        let y: CGFloat
++        if adPosition == "TOP_CENTER" {
++            y = safe.top + CGFloat(margin)
++        } else {
++            // The creative leaves about 5pt of the fixed slot empty underneath.
++            // Tuck that into the safe area so the visible ad sits on the inset.
++            y = root.bounds.height - safe.bottom - CGFloat(margin) - height + 5
++        }
++        bannerView.autoresizingMask = [.flexibleTopMargin, .flexibleLeftMargin, .flexibleRightMargin]
++        bannerView.frame = CGRect(x: x, y: y, width: width, height: height)
++        pinCreative(toBottomOf: bannerView)
++    }
++
++    /// The 320×50 slot stays fixed. A shorter creative is bottom-aligned, not
++    /// centered, so it doesn't leave a gap under the ad on any device.
++    private func pinCreative(toBottomOf bannerView: GADBannerView) {
++        let bounds = bannerView.bounds
++        for sub in bannerView.subviews {
++            let subSize = sub.frame.size
++            let subW = subSize.width > 1 ? min(subSize.width, bounds.width) : bounds.width
++            let subH = subSize.height > 1 ? min(subSize.height, bounds.height) : bounds.height
++            sub.frame = CGRect(x: (bounds.width - subW) / 2, y: bounds.height - subH, width: subW, height: subH)
+         }
+     }
+ 
+@@ -146,12 +170,17 @@ class BannerExecutor: NSObject, GADBannerViewDelegate {
+     /// Tells the delegate an ad request loaded an ad.
+     func bannerViewDidReceiveAd(_ bannerView: GADBannerView) {
+         NSLog("bannerViewDidReceiveAd")
+-
+-        self.plugin?.notifyListeners(BannerAdPluginEvents.SizeChanged.rawValue, data: [
+-            "width": bannerView.frame.width,
+-            "height": bannerView.frame.height
+-        ])
+-        self.plugin?.notifyListeners(BannerAdPluginEvents.Loaded.rawValue, data: [:])
++        // The creative is attached after this callback; place it on the next turn
++        // so the inner web view exists and can be centered in the 50pt box.
++        DispatchQueue.main.async {
++            self.placeBanner(bannerView, self.bannerPosition, self.bannerMargin)
++            let size = bannerView.adSize.size
++            self.plugin?.notifyListeners(BannerAdPluginEvents.SizeChanged.rawValue, data: [
++                "width": size.width,
++                "height": size.height
++            ])
++            self.plugin?.notifyListeners(BannerAdPluginEvents.Loaded.rawValue, data: [:])
++        }
+     }
+ 
+     /// Tells the delegate an ad request failed.
